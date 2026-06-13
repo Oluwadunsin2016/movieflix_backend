@@ -4,7 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "check": "node --check server.js && node --check controllers/userController.js && node --check controllers/movieController.js && node --check controllers/youtubeController.js && node --check controllers/curationController.js && node --check routes/userRoutes.js && node --check routes/youtubeRoutes.js && node --check routes/curationRoutes.js && node --check middlewares/authMiddleware.js && node --check middlewares/adminMiddleware.js && node --check middlewares/errorMiddleware.js && node --check middlewares/rateLimiter.js && node --check middlewares/authValidation.js && node --check models/user.js && node --check models/Movie.js && node --check models/CuratedMovie.js && node --check utils/movieFilters.js && node --check utils/cache.js && node --check utils/configStatus.js && node --check utils/sendEmail.js && node --check utils/emailTemplates.js && node --check scripts/cleanupDuplicateMovies.js && node --check scripts/promoteAdmin.js && node --check scripts/seedCuratedMovies.js",
+    "admin:promote": "node scripts/promoteAdmin.js",
+    "admin:promote:apply": "node scripts/promoteAdmin.js --apply",
+    "cleanup:movies": "node scripts/cleanupDuplicateMovies.js",
+    "cleanup:movies:apply": "node scripts/cleanupDuplicateMovies.js --apply",
+    "seed:curation": "node scripts/seedCuratedMovies.js",
+    "seed:curation:apply": "node scripts/seedCuratedMovies.js --apply",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
@@ -23,6 +29,7 @@
     "mongoose": "^8.10.1",
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
+    "nodemailer": "^8.0.10",
     "nodemon": "^3.1.9"
   }
 }

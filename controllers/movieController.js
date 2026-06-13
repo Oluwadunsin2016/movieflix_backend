@@ -1,98 +1,170 @@
 const Movie = require("../models/Movie");
 
-// ✅ Save a movie
-exports.saveMovie = async (req, res) => {
-    const { videoId, title, description, thumbnail, channelTitle, publishedAt, category } = req.body;
-  
-    try {
-      const existingMovie = await Movie.findOne({ userId: req.user._id, videoId, category });
-  
-      if (existingMovie) {
-        if (category === "watching") {
-          // Remove the old "watching" entry
-          await Movie.deleteOne({ _id: existingMovie._id });
-        } else {
-          // If it's not "watching", don't allow duplicates
-          return res.status(409).json({ message: "Already saved" });
-        }
-      }
-  
-      const newMovie = new Movie({
-        userId: req.user._id,
-        videoId,
-        title,
-        description,
-        thumbnail,
-        channelTitle,
-        publishedAt,
-        category,
-      });
-  
-      await newMovie.save();
-  
-      res.status(201).json({ message: "Saved successfully", movie: newMovie });
-    } catch (err) {
-      res.status(500).json({ message: "Failed to save movie", error: err.message });
-    }
-  };
-  
+const VALID_CATEGORIES = ["watchLater", "loved", "watching"];
 
-// ✅ Get saved movies by category
-exports.getSavedMovies = async (req, res) => {
-  const { category } = req.params;
+const isValidCategory = (category) => VALID_CATEGORIES.includes(category);
+
+const normalizeMoviePayload = (payload) => ({
+  videoId: String(payload.videoId || "").trim(),
+  title: String(payload.title || "").trim(),
+  description: String(payload.description || "").trim(),
+  thumbnail: String(payload.thumbnail || "").trim(),
+  channelTitle: String(payload.channelTitle || "").trim(),
+  publishedAt: payload.publishedAt ? new Date(payload.publishedAt) : new Date(),
+  category: payload.category,
+});
+
+const validateMoviePayload = (movie) => {
+  if (!isValidCategory(movie.category)) return "Invalid movie category";
+  if (!movie.videoId) return "Video ID is required";
+  if (!movie.title) return "Movie title is required";
+  if (!movie.thumbnail) return "Movie thumbnail is required";
+  if (Number.isNaN(movie.publishedAt.getTime())) return "Invalid published date";
+  return null;
+};
+
+const toYouTubeSearchResult = (movie) => {
+  const publishedAt = movie.publishedAt || movie.createdAt || new Date();
+
+  return {
+    kind: "youtube#searchResult",
+    etag: movie._id.toString(),
+    id: {
+      kind: "youtube#video",
+      videoId: movie.videoId,
+    },
+    snippet: {
+      publishedAt: publishedAt.toISOString(),
+      publishTime: publishedAt.toISOString(),
+      title: movie.title,
+      description: movie.description,
+      channelTitle: movie.channelTitle,
+      channelId: "",
+      liveBroadcastContent: "none",
+      thumbnails: {
+        default: {
+          url: `https://i.ytimg.com/vi/${movie.videoId}/default.jpg`,
+          width: 120,
+          height: 90,
+        },
+        medium: {
+          url: `https://i.ytimg.com/vi/${movie.videoId}/mqdefault.jpg`,
+          width: 320,
+          height: 180,
+        },
+        high: {
+          url: movie.thumbnail,
+          width: 480,
+          height: 360,
+        },
+      },
+    },
+  };
+};
+
+exports.saveMovie = async (req, res) => {
+  const moviePayload = normalizeMoviePayload(req.body);
+  const validationError = validateMoviePayload(moviePayload);
+
+  if (validationError) {
+    return res.status(400).json({ success: false, message: validationError });
+  }
 
   try {
-    const savedMovies = await Movie.find({ userId: req.user._id, category }).sort({ createdAt: -1 });
+    const query = {
+      userId: req.user._id,
+      videoId: moviePayload.videoId,
+      category: moviePayload.category,
+    };
 
-    const movies = savedMovies.map((movie) => ({
-        kind: "youtube#searchResult",
-        etag: movie._id.toString(), // you can use _id as a unique etag
-        id: {
-          kind: "youtube#video",
-          videoId: movie.videoId,
-        },
-        snippet: {
-          publishedAt: new Date(movie.publishedAt).toISOString(),
-          publishTime: new Date(movie.publishedAt).toISOString(),
-          title: movie.title,
-          description: movie.description,
-          channelTitle: movie.channelTitle,
-          channelId: "", // optional: store it when saving if you want it accurate
-          liveBroadcastContent: "none",
-          thumbnails: {
-            default: {
-              url: `https://i.ytimg.com/vi/${movie.videoId}/default.jpg`,
-              width: 120,
-              height: 90,
-            },
-            medium: {
-              url: `https://i.ytimg.com/vi/${movie.videoId}/mqdefault.jpg`,
-              width: 320,
-              height: 180,
-            },
-            high: {
-              url: movie.thumbnail, // already high res
-              width: 480,
-              height: 360,
-            },
-          },
-        },
-      }));
-  
-    res.json(movies);
+    if (moviePayload.category === "watching") {
+      const movie = await Movie.findOneAndUpdate(
+        query,
+        { ...moviePayload, userId: req.user._id },
+        { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Continue Watching updated",
+        movie,
+      });
+    }
+
+    const existingMovie = await Movie.findOne(query);
+    if (existingMovie) {
+      return res.status(200).json({
+        success: true,
+        message: "Already saved",
+        movie: existingMovie,
+      });
+    }
+
+    const newMovie = await Movie.create({
+      ...moviePayload,
+      userId: req.user._id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Saved successfully",
+      movie: newMovie,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch movies", error: err.message });
+    if (err.code === 11000) {
+      return res.status(200).json({ success: true, message: "Already saved" });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save movie",
+      error: err.message,
+    });
   }
 };
 
-// ✅ Remove a movie from list
+exports.getSavedMovies = async (req, res) => {
+  const { category } = req.params;
+
+  if (!isValidCategory(category)) {
+    return res.status(400).json({ success: false, message: "Invalid movie category" });
+  }
+
+  try {
+    const savedMovies = await Movie.find({ userId: req.user._id, category }).sort({ updatedAt: -1 });
+    return res.json(savedMovies.map(toYouTubeSearchResult));
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch movies",
+      error: err.message,
+    });
+  }
+};
+
 exports.removeMovie = async (req, res) => {
   const { videoId, category } = req.params;
 
+  if (!isValidCategory(category)) {
+    return res.status(400).json({ success: false, message: "Invalid movie category" });
+  }
+
+  if (!videoId) {
+    return res.status(400).json({ success: false, message: "Video ID is required" });
+  }
+
   try {
-    await Movie.deleteOne({ userId: req.user._id, videoId, category });
-    res.json({ message: "Movie removed" });
+    const result = await Movie.deleteOne({ userId: req.user._id, videoId, category });
+    return res.json({
+      success: true,
+      deleted: result.deletedCount > 0,
+      message: result.deletedCount > 0 ? "Movie removed" : "Movie was not in this list",
+    });
   } catch (err) {
-    res.status(500).json({ message: "Failed to remove movie", error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to remove movie",
+      error: err.message,
+    });
   }
 };

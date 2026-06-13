@@ -1,10 +1,11 @@
 const mongoose = require("mongoose");
 
-const movieSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
+const curatedMovieSchema = new mongoose.Schema({
+  collectionId: {
+    type: String,
     required: true,
+    trim: true,
+    lowercase: true,
   },
   videoId: {
     type: String,
@@ -35,15 +36,19 @@ const movieSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-  category: {
-    type: String,
-    enum: ["watchLater", "loved", "watching"],
-    required: true,
+  sortOrder: {
+    type: Number,
+    default: 0,
+  },
+  addedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
   },
 }, {
   timestamps: true,
 });
 
-movieSchema.index({ userId: 1, videoId: 1, category: 1 }, { unique: true });
+curatedMovieSchema.index({ collectionId: 1, videoId: 1 }, { unique: true });
+curatedMovieSchema.index({ collectionId: 1, sortOrder: 1, updatedAt: -1 });
 
-module.exports = mongoose.model("Movie", movieSchema);
+module.exports = mongoose.model("CuratedMovie", curatedMovieSchema);
